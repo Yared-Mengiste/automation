@@ -18,10 +18,7 @@ def test_cli_free_check_uses_hashed_auth_without_drive(
     setup(monkeypatch, accounts, "creator-test-password", ["check", str(path)])
     assert cli.main() == 0
     output = json.loads(capsys.readouterr().out)
-    assert [(section["duration"], section["shots"]) for section in output["sections"]] == [
-        (14, 8),
-        (22, 4),
-    ]
+    assert output == {"passed": True, "pages": 2, "input_mode": "document"}
 
 
 def test_cli_invalid_password_blocks_check(monkeypatch, accounts, pdf, tmp_path, capsys):

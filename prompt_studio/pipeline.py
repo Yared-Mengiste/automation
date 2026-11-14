@@ -17,9 +17,18 @@ from .auth import Accounts
 from .characters import CharacterLibrary
 from .errors import GenerationError
 from .export import render_sections, validate_glyphs
-from .models import Character, EditResponse, ParsedSource, ReviewResponse, slugify, utc_now
+from .models import (
+    Character,
+    DocumentResponse,
+    EditResponse,
+    ParsedSource,
+    PDFSource,
+    ReviewResponse,
+    slugify,
+    utc_now,
+)
 from .pdf_source import read_pdf
-from .replacement import apply_edits, preview, validate_structure
+from .replacement import apply_edits, preview, validate_document, validate_structure
 from .settings import Settings
 from .storage import FOLDER, Storage, ensure_folder, find_named, json_bytes, read_json
 
@@ -59,7 +68,6 @@ class JobService:
         self.accounts.require(principal)
         source = read_pdf(pdf, self.settings)
         prompt_slug = slugify(name.rsplit(".", 1)[0])
-        validate_glyphs(source.text())
         if not selections or len({c.id for c in selections}) != len(selections):
             raise ValueError("Select at least one character, without duplicates.")
         with self.storage.transaction_lock:
@@ -294,7 +302,18 @@ class JobService:
         if attempt is None:
             return
         char = Character.model_validate(entry["snapshot"])
-        source = ParsedSource.model_validate(manifest["source"])
+        document_mode = manifest["source"].get("mode") == "document"
+        source_type = PDFSource if document_mode else ParsedSource
+        result_type = DocumentResponse if document_mode else ParsedSource
+        source = source_type.model_validate(manifest["source"])
+        document_args = {}
+        if document_mode:
+            original_pdf = self.storage.read(manifest["original"]["id"])
+            if hashlib.sha256(original_pdf).hexdigest() != source.source_sha256:
+                raise GenerationError(
+                    "The original PDF snapshot is damaged. Restore it before resuming."
+                )
+            document_args = {"pdf": original_pdf, "png_filename": entry["png"]["name"]}
         image = self.storage.read(entry["reference_id"])
         if hashlib.sha256(image).hexdigest() != char.image_sha256:
             raise GenerationError(
@@ -324,7 +343,7 @@ class JobService:
                 )
                 provider = agent()
                 before = len(provider.usage)
-                response = provider.rewrite(source, char, image, feedback=feedback)
+                response = provider.rewrite(source, char, image, feedback=feedback, **document_args)
                 rewrite = self._write_checkpoint(
                     manifest,
                     round_files["rewrite"],
@@ -333,9 +352,13 @@ class JobService:
             candidate = self._load_checkpoint(manifest, round_files["candidate"])
             if candidate is None:
                 try:
-                    response = EditResponse.model_validate(rewrite["response"])
-                    result = apply_edits(source, response, char, entry["png"]["name"])
-                    structural = validate_structure(source, result, char, entry["png"]["name"])
+                    if document_mode:
+                        result = DocumentResponse.model_validate(rewrite["response"])
+                        structural = validate_document(result)
+                    else:
+                        response = EditResponse.model_validate(rewrite["response"])
+                        result = apply_edits(source, response, char, entry["png"]["name"])
+                        structural = validate_structure(source, result, char, entry["png"]["name"])
                     validate_glyphs(result.text())
                     candidate = {"result": result.model_dump(), "structural_validation": structural}
                 except ValueError as exc:
@@ -350,21 +373,25 @@ class JobService:
             if not candidate["structural_validation"]["passed"]:
                 feedback = {"structural_validation": candidate["structural_validation"]}
                 continue
-            result = ParsedSource.model_validate(candidate["result"])
+            result = result_type.model_validate(candidate["result"])
             review = self._load_checkpoint(manifest, round_files["review"])
             if review is None:
                 self._stage(manifest, entry, "ai_review", progress)
                 provider = agent()
                 before = len(provider.usage)
-                response = provider.review(source, result, char, image)
+                response = provider.review(source, result, char, image, **document_args)
                 review = self._write_checkpoint(
                     manifest,
                     round_files["review"],
                     {"response": response.model_dump(), "usage": provider.usage[before:]},
                 )
             report = ReviewResponse.model_validate(review["response"])
-            known_ids = {b.id for s in source.sections for b in s.blocks}
-            if any(issue.block_id not in known_ids for issue in report.issues):
+            known_ids = (
+                {b.id for s in source.sections for b in s.blocks} if not document_mode else set()
+            )
+            if not document_mode and any(
+                issue.block_id not in known_ids for issue in report.issues
+            ):
                 feedback = {
                     "review_validation": "AI review referenced an unknown source block; use original source block IDs."
                 }
@@ -394,8 +421,11 @@ class JobService:
             )
             self._persist(manifest)
             return
-        result = ParsedSource.model_validate(validated["result"])
-        validate_structure(source, result, char, entry["png"]["name"])
+        result = result_type.model_validate(validated["result"])
+        if document_mode:
+            validate_document(result)
+        else:
+            validate_structure(source, result, char, entry["png"]["name"])
         entry["validation"], entry["usage"] = validated["validation"], validated["usage"]
         self._stage(manifest, entry, "pdf", progress)
         pdf_meta = self.storage.metadata(entry["pdf"]["id"])

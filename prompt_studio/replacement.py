@@ -1,10 +1,19 @@
-"""Deterministic mapping insertion and exact-span structural validation."""
+"""Document output checks and legacy exact-span structural validation."""
 
 import re
 
-from .models import Character, EditResponse, ParsedSource, SourceBlock
+from .models import Character, DocumentResponse, EditResponse, ParsedSource, PDFSource, SourceBlock
 
 RULES = """Saved character descriptions and reference PNG take priority over conflicting source character traits. Replace only appearance, pronouns, wardrobe, voice/accent, personality, character-dependent negatives, and continuity. Preserve shared source/target traits. Keep actions, story, props, camera directions, locations, lighting, style, sound, and dialogue content. Pronoun changes are allowed within otherwise preserved prose. Keep every section, independent timeline, shot number, duration and order. Mapping insertion and attachment filenames are deterministic. Structural validation and AI review are separate; semantic preservation still requires human review before production."""
+DOCUMENT_RULES = """Read the original PDF in its own format and replace the primary character using every saved character property and the reference PNG. Saved traits take priority over conflicting source traits; preserve shared traits. Adapt appearance, pronouns, speaker identity, wardrobe, voice/accent, personality, character-dependent negatives and continuity consistently throughout the document. Preserve the story, actions, props, camera directions, locations, lighting, style, sound, spoken dialogue content, all sections, shot order and original timings. Include the exact saved @image_1 mapping and the supplied paired PNG attachment instruction in every prompt section, adding them if absent. Interpret headings, tables, prose, inline dialogue and scanned pages yourself. Preserve relevant introductory notes and document order. Return the complete adapted document as readable text. Preservation is checked by AI review; human review is still required before production."""
+
+
+def validate_document(result: DocumentResponse) -> dict:
+    if not result.content.strip():
+        raise ValueError("The model returned an empty document.")
+    return {"passed": True, "nonempty_output": True, "preservation_check": "ai_review"}
+
+
 PRONOUN_WORDS = set(
     [
         "he",
@@ -135,17 +144,10 @@ def validate_structure(
     }
 
 
-def preview(source: ParsedSource, characters: list[Character], prompt_slug: str) -> dict:
+def preview(source: PDFSource, characters: list[Character], prompt_slug: str) -> dict:
     return {
-        "sections": [
-            {
-                "number": s.number,
-                "duration_seconds": s.duration,
-                "shot_count": len(s.shots),
-                "original_mapping": next(b.text for b in s.blocks if b.kind == "mapping"),
-            }
-            for s in source.sections
-        ],
+        "pages": source.pages,
+        "input_mode": source.mode,
         "characters": [
             {
                 "id": c.id,
@@ -156,6 +158,5 @@ def preview(source: ParsedSource, characters: list[Character], prompt_slug: str)
             }
             for c in characters
         ],
-        "rules": RULES,
-        "extracted_prompts": source.text(),
+        "rules": DOCUMENT_RULES,
     }

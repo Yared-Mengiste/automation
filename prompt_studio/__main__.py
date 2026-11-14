@@ -1,4 +1,4 @@
-"""Authenticated CLI using the same parser, library, and recoverable job service."""
+"""Authenticated CLI using the same PDF checks, library, and recoverable jobs."""
 
 import argparse
 import getpass
@@ -29,7 +29,7 @@ def main() -> int:
     commands.add_parser(
         "hash-password", help="Generate a salted scrypt hash locally; no sign-in required"
     )
-    check = commands.add_parser("check", help="Free PDF structure check")
+    check = commands.add_parser("check", help="Free nonempty PDF check")
     check.add_argument("pdf", type=Path)
     generate = commands.add_parser("generate", help="Save snapshots and generate, or queue if busy")
     generate.add_argument("pdf", type=Path)
@@ -85,15 +85,9 @@ def main() -> int:
             print(
                 json.dumps(
                     {
-                        "sections": [
-                            {
-                                "duration": s.duration,
-                                "shots": len(s.shots),
-                                "mapping": next(b.text for b in s.blocks if b.kind == "mapping"),
-                            }
-                            for s in source.sections
-                        ],
-                        "extracted_prompts": source.text(),
+                        "passed": True,
+                        "pages": source.pages,
+                        "input_mode": source.mode,
                     },
                     ensure_ascii=False,
                     indent=2,

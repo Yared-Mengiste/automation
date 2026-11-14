@@ -3,10 +3,12 @@ import json
 import zipfile
 
 import pytest
-from conftest import Interruption
+from conftest import Interruption, parse_labeled_pdf
 from pypdf import PdfReader
 
 from prompt_studio.errors import GenerationError
+from prompt_studio.export import render_sections
+from prompt_studio.models import DocumentResponse
 from prompt_studio.pipeline import JobService
 from prompt_studio.settings import Settings
 
@@ -20,6 +22,74 @@ def restarted(jobs, drive, accounts, library, ai, renderer=None):
         ai_factory=lambda config: ai,
         renderer=renderer or jobs.renderer,
     )
+
+
+def test_document_job_sends_saved_original_to_rewrite_review_and_correction(
+    jobs, creator, character, pdf, ai, drive
+):
+    ai.bad_reviews = 1
+    job = jobs.create(creator, pdf, "Cake.pdf", [character])
+    assert job["source"]["mode"] == "document"
+    assert "sections" not in job["source"]
+    result = jobs.resume(creator, job["id"])
+    assert result["status"] == "complete"
+    assert ai.documents == [pdf, pdf]
+    assert ai.review_documents == [pdf, pdf]
+    assert drive.read(job["original"]["id"]) == pdf
+    validation = result["characters"][0]["validation"]["structural"]
+    assert validation == {
+        "passed": True,
+        "nonempty_output": True,
+        "preservation_check": "ai_review",
+    }
+
+
+def test_damaged_original_snapshot_stops_before_model_call(
+    jobs, creator, character, pdf, ai, drive
+):
+    job = jobs.create(creator, pdf, "Cake.pdf", [character])
+    drive.files[job["original"]["id"]]["data"] = b"damaged"
+    result = jobs.resume(creator, job["id"])
+    assert result["status"] == "partial"
+    assert "original PDF snapshot is damaged" in result["characters"][0]["error"]
+    assert (ai.rewrites, ai.reviews) == (0, 0)
+
+
+def test_legacy_pending_job_can_still_resume(jobs, creator, character, pdf, ai):
+    job = jobs.create(creator, pdf, "Cake.pdf", [character])
+    job["source"] = parse_labeled_pdf(pdf).model_dump()
+    jobs._persist(job)
+    result = jobs.resume(creator, job["id"])
+    assert result["status"] == "complete"
+    assert result["characters"][0]["validation"]["structural"]["dialogue_and_timings_preserved"]
+    assert not ai.documents
+
+
+def test_free_check_does_not_extract_or_parse_pdf_text(jobs, creator, character, pdf, monkeypatch):
+    from pypdf._page import PageObject
+
+    def fail(*args, **kwargs):
+        raise AssertionError("The free check must not extract text.")
+
+    monkeypatch.setattr(PageObject, "extract_text", fail)
+    source, slug, preview = jobs.check(creator, pdf, "Cake.pdf", [character])
+    assert source.mode == "document" and preview["pages"] == 2
+    assert (jobs.ai_factory(jobs.settings).rewrites, jobs.ai_factory(jobs.settings).reviews) == (
+        0,
+        0,
+    )
+
+
+def test_arbitrary_pdf_can_generate_without_labeled_sections(jobs, creator, character, ai, drive):
+    pdf = render_sections(DocumentResponse(content="Recipe notes\nMix oats and water."), "Notes")
+    job = jobs.create(creator, pdf, "Notes.pdf", [character])
+    result = jobs.resume(creator, job["id"])
+    assert result["status"] == "complete"
+    assert ai.documents == ai.review_documents == [pdf]
+    output = drive.read(result["characters"][0]["pdf"]["id"])
+    text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(output)).pages)
+    assert "Mix oats and water." in text
+    assert character.mapping in " ".join(text.split())
 
 
 def test_two_characters_and_shared_history_bundle(
@@ -150,7 +220,7 @@ def test_review_repair_exhaustion_and_per_character_retry(jobs, creator, charact
     assert len(result["characters"][0]["attempts"]) == 2
 
 
-def test_structural_repair_exhaustion_uses_no_review_calls(jobs, creator, character, pdf, ai):
+def test_empty_output_repair_exhaustion_uses_no_review_calls(jobs, creator, character, pdf, ai):
     ai.bad_edits = True
     job = jobs.create(creator, pdf, "Cake.pdf", [character])
     result = jobs.resume(creator, job["id"])
@@ -308,36 +378,26 @@ def test_noncomplete_jobs_cannot_claim_complete_download(jobs, creator, characte
         jobs.download(creator, job["id"], character.id, "pdf")
 
 
-def test_actual_story_change_is_rejected_even_with_allowed_trait_label(
+def test_story_change_in_full_document_is_rejected_by_model_review(
     jobs, creator, character, pdf, ai
 ):
-    from prompt_studio.models import ReviewResponse, TargetedEdit
+    from prompt_studio.models import ReviewResponse
 
     original_rewrite = ai.rewrite
 
-    def malicious(source, char, image, feedback=None):
-        response = original_rewrite(source, char, image, feedback)
-        block = next(b for b in source.sections[0].blocks if b.editable and "three eggs" in b.text)
-        response.edits.append(
-            TargetedEdit(
-                block_id=block.id,
-                original="three eggs",
-                replacement="one cup of flour",
-                trait="personality",
-                reason="Disallowed change concealed as a saved trait.",
-            )
-        )
+    def malicious(source, char, image, feedback=None, **kwargs):
+        response = original_rewrite(source, char, image, feedback, **kwargs)
+        response.content = response.content.replace("three eggs", "one cup of flour")
         return response
 
-    def review(source, result, char, image):
+    def review(source, result, char, image, **kwargs):
         assert "one cup of flour" in result.text()
-        block = next(b for b in source.sections[0].blocks if b.editable and "three eggs" in b.text)
         ai.reviews += 1
         return ReviewResponse(
             passed=False,
             issues=[
                 {
-                    "block_id": block.id,
+                    "block_id": "shot 1 dialogue and recipe action",
                     "category": "protected_meaning",
                     "explanation": "The action changed eggs to flour; protected story changed.",
                 }
@@ -357,10 +417,10 @@ def test_actual_story_change_is_rejected_even_with_allowed_trait_label(
     assert jobs.storage.metadata(result["characters"][0]["pdf"]["id"]) is None
 
 
-def test_unknown_review_block_gets_bounded_correction(jobs, creator, character, pdf, ai):
+def test_review_locations_get_bounded_correction(jobs, creator, character, pdf, ai):
     from prompt_studio.models import ReviewResponse
 
-    def invalid_review(*args):
+    def invalid_review(*args, **kwargs):
         ai.reviews += 1
         return ReviewResponse(
             passed=False,
@@ -381,12 +441,10 @@ def test_unknown_review_block_gets_bounded_correction(jobs, creator, character, 
     assert result["characters"][0]["attempts"][0]["outcome"] == "exhausted"
 
 
-def test_real_sample_two_character_structural_acceptance_and_restart(
+def test_real_sample_two_character_document_acceptance_and_restart(
     jobs, library, admin, creator, character, fields, png, ai, drive, accounts
 ):
     from pathlib import Path
-
-    from prompt_studio.pdf_source import read_pdf
 
     sample = Path("banana-cake.pdf")
     if not sample.is_file():
@@ -401,7 +459,7 @@ def test_real_sample_two_character_structural_acceptance_and_restart(
         ),
         png,
     )
-    original = read_pdf(sample.read_bytes())
+    original = parse_labeled_pdf(sample.read_bytes())
     job = jobs.create(creator, sample.read_bytes(), sample.name, [character, second])
     first_pass = jobs.resume(creator, job["id"], character_id=character.id)
     assert first_pass["characters"][0]["status"] == "complete"
@@ -410,15 +468,12 @@ def test_real_sample_two_character_structural_acceptance_and_restart(
     assert complete["status"] == "complete"
     assert (ai.rewrites, ai.reviews) == (2, 2)
     for entry in complete["characters"]:
-        output = read_pdf(drive.read(entry["pdf"]["id"]))
-        assert [(s.duration, [(x.start, x.end) for x in s.shots]) for s in output.sections] == [
-            (s.duration, [(x.start, x.end) for x in s.shots]) for s in original.sections
-        ]
-        assert [b.text for s in output.sections for b in s.blocks if b.kind == "dialogue"] == [
-            b.text for s in original.sections for b in s.blocks if b.kind == "dialogue"
-        ]
-        assert [b.text for s in output.sections for b in s.blocks if b.kind == "mapping"] == [
-            entry["snapshot"]["mapping"]
-        ] * 2
-        assert entry["png"]["name"] in output.text()
+        reader = PdfReader(io.BytesIO(drive.read(entry["pdf"]["id"])))
+        text = " ".join(" ".join(page.extract_text() for page in reader.pages).split())
+        for section in original.sections:
+            for block in section.blocks:
+                if block.kind in {"shot_header", "dialogue", "format"}:
+                    assert block.text in text
+        assert text.count(entry["snapshot"]["mapping"]) == 2
+        assert entry["png"]["name"] in text
     assert jobs.bundle(admin, job["id"])

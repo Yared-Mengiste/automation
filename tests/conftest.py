@@ -7,17 +7,35 @@ from uuid import uuid4
 
 import pytest
 from PIL import Image
+from pypdf import PdfReader
 
 from prompt_studio.auth import Accounts, hash_password
 from prompt_studio.characters import CharacterLibrary
 from prompt_studio.export import render_sections
-from prompt_studio.models import CharacterFields, EditResponse, ReviewResponse, TargetedEdit
+from prompt_studio.models import (
+    CharacterFields,
+    DocumentResponse,
+    EditResponse,
+    PDFSource,
+    ReviewResponse,
+    TargetedEdit,
+)
 from prompt_studio.pdf_source import parse_text
 from prompt_studio.pipeline import JobService
+from prompt_studio.replacement import apply_edits
 from prompt_studio.settings import Settings
 from prompt_studio.storage import APP, FOLDER
 
 FIXTURE = Path(__file__).parent / "fixtures" / "two-sections.txt"
+
+
+def parse_labeled_pdf(data):
+    return parse_text(
+        "\n".join(
+            p.extract_text(extraction_mode="layout") or ""
+            for p in PdfReader(io.BytesIO(data)).pages
+        )
+    )
 
 
 class Interruption(BaseException):
@@ -90,8 +108,32 @@ class FakeAI:
         self.feedback = []
         self.bad_reviews = 0
         self.bad_edits = False
+        self.documents = []
+        self.review_documents = []
 
-    def rewrite(self, source, character, image, feedback=None):
+    def rewrite(self, source, character, image, feedback=None, *, pdf=None, png_filename=None):
+        if isinstance(source, PDFSource):
+            self.documents.append(pdf)
+            try:
+                parsed = parse_labeled_pdf(pdf)
+            except ValueError:
+                self.rewrites += 1
+                self.feedback.append(feedback)
+                text = "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages)
+                return DocumentResponse(
+                    content=(
+                        character.mapping
+                        + "\n"
+                        + f"ATTACHMENT: Attach {png_filename} as @image_1.\n"
+                        + (text or "Adapted scanned prompt.")
+                    )
+                )
+            response = FakeAI.rewrite(self, parsed, character, image, feedback)
+            if self.bad_edits:
+                return DocumentResponse(content=" ")
+            return DocumentResponse(
+                content=apply_edits(parsed, response, character, png_filename).text()
+            )
         self.rewrites += 1
         self.feedback.append(feedback)
         edits = []
@@ -154,7 +196,9 @@ class FakeAI:
         )
         return EditResponse(edits=edits)
 
-    def review(self, source, result, character, image):
+    def review(self, source, result, character, image, *, pdf=None, png_filename=None):
+        if isinstance(source, PDFSource):
+            self.review_documents.append(pdf)
         self.reviews += 1
         self.usage.append(
             {
@@ -164,12 +208,16 @@ class FakeAI:
             }
         )
         if self.reviews <= self.bad_reviews:
-            block = next(b for b in source.sections[0].blocks if b.editable)
+            block_id = (
+                "wardrobe paragraph"
+                if isinstance(source, PDFSource)
+                else next(b.id for b in source.sections[0].blocks if b.editable)
+            )
             return ReviewResponse(
                 passed=False,
                 issues=[
                     {
-                        "block_id": block.id,
+                        "block_id": block_id,
                         "category": "protected_meaning",
                         "explanation": "Story changed or obsolete wardrobe remains.",
                     }

@@ -200,11 +200,9 @@ def generate_page(principal, library, jobs):
         return
     upload_column, selection_column = st.columns(2, gap="large")
     with upload_column, st.container(border=True, key="studio-upload"):
-        step_header(1, "Upload your prompt", "Start with the original, text-based PDF.")
+        step_header(1, "Upload your prompt", "Start with the original PDF, in any prompt format.")
         upload = st.file_uploader("Original prompt PDF", type=["pdf"])
-        st.caption(
-            "Limits: 10 MB, 30 text-based pages, 40,000 extracted characters, @image_1 only."
-        )
+        st.caption("Upload a nonempty PDF up to 10 MB and 30 pages. Scanned pages are supported.")
     with selection_column, st.container(border=True, key="studio-selection"):
         step_header(
             2, "Choose your cast", "Each selected character gets a separate PDF and reference PNG."
@@ -233,28 +231,11 @@ def generate_page(principal, library, jobs):
     # Free preview is rebuilt from current inputs and versions; stale previews cannot start paid work.
     source, slug, checked = jobs.check(principal, upload.getvalue(), upload.name, selected)
     with st.container(border=True, key="studio-preview"):
-        step_header(
-            3, "Review the preview", "Check the structure and output plan before generation."
-        )
-        st.success("PDF structure passed. This preview uses no AI calls.")
-        section_count, shot_count, output_count = st.columns(3)
-        section_count.metric("Sections", len(source.sections))
-        shot_count.metric("Shots", sum(len(section.shots) for section in source.sections))
+        step_header(3, "Review the preview", "Check your PDF and selected character outputs.")
+        st.success("PDF is ready. The model will read it during generation.")
+        page_count, output_count = st.columns(2)
+        page_count.metric("PDF pages", source.pages)
         output_count.metric("Character outputs", len(selected))
-        st.dataframe(
-            [
-                {
-                    "Section": section["number"],
-                    "Duration (seconds)": section["duration_seconds"],
-                    "Shots": section["shot_count"],
-                }
-                for section in checked["sections"]
-            ],
-            hide_index=True,
-            width="stretch",
-        )
-        with st.expander("Extracted prompts", expanded=False):
-            st.code(checked["extracted_prompts"], language=None, wrap_lines=True)
         with st.expander("Output filenames and preservation rules"):
             st.dataframe(checked["characters"], hide_index=True, width="stretch")
             st.write(checked["rules"])
@@ -267,7 +248,7 @@ def generate_page(principal, library, jobs):
         notice, action = st.columns([3, 1], vertical_alignment="center")
         with notice:
             st.caption(
-                f"Generate makes paid Claude calls using {jobs.settings.claude_model}. The prompt and selected character snapshots are sent to Anthropic and saved in the private Drive folder."
+                f"Generate makes paid Claude calls using {jobs.settings.claude_model}. The original PDF, saved character properties and reference image are sent to Anthropic and saved in the private Drive folder."
             )
         with action:
             generate = st.button("Save and generate", type="primary", width="stretch")

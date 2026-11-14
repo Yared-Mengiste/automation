@@ -104,6 +104,19 @@ class ParsedSource(Contract):
         return "\n\n".join(b.text for s in self.sections for b in s.blocks)
 
 
+class PDFSource(Contract):
+    mode: Literal["document"] = "document"
+    pages: int
+    source_sha256: str
+
+
+class DocumentResponse(Contract):
+    content: str = Field(min_length=1)
+
+    def text(self) -> str:
+        return self.content
+
+
 Trait = Literal[
     "appearance",
     "pronouns",

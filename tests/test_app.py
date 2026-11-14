@@ -4,15 +4,19 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from prompt_studio import pipeline, storage
+from prompt_studio.export import render_sections
+from prompt_studio.models import DocumentResponse
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
 
 
 @pytest.fixture
 def app_config(monkeypatch, accounts, drive):
+    st.cache_resource.clear()
     monkeypatch.setenv("APP_USERS_JSON", json.dumps(accounts.users))
     monkeypatch.setattr(storage, "DriveStorage", lambda settings: drive)
     return accounts
@@ -47,6 +51,20 @@ def test_hashed_sign_in_and_sign_out(app_config, character):
     assert not app.get("file_uploader")
     assert len(app.text_input) == 2
     assert "principal" not in app.session_state
+
+
+def test_generate_preview_accepts_arbitrary_pdf(app_config, monkeypatch, character):
+    upload = io.BytesIO(
+        render_sections(DocumentResponse(content="Recipe notes without shots."), "Notes")
+    )
+    upload.name = "notes.pdf"
+    app = signed_in("creator", "creator-test-password")
+    monkeypatch.setattr(st, "file_uploader", lambda *args, **kwargs: upload)
+    app.multiselect[0].set_value([character.id]).run(timeout=30)
+    assert not app.exception
+    assert any(item.label == "PDF pages" and item.value == "1" for item in app.metric)
+    assert any("PDF is ready" in item.value for item in app.success)
+    assert any(button.label == "Save and generate" for button in app.button)
 
 
 def test_creator_library_is_read_only(app_config, character):

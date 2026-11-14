@@ -8,7 +8,7 @@ from fontTools.ttLib import TTFont
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
-from .models import ParsedSource
+from .models import DocumentResponse, ParsedSource
 
 
 @lru_cache(maxsize=8)
@@ -45,7 +45,7 @@ def validate_glyphs(text: str) -> list[Path]:
     return paths
 
 
-def render_sections(source: ParsedSource, title: str) -> bytes:
+def render_sections(source: ParsedSource | DocumentResponse, title: str) -> bytes:
     paths = validate_glyphs(source.text() + title)
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=16)
@@ -58,6 +58,14 @@ def render_sections(source: ParsedSource, title: str) -> bytes:
     pdf.set_fallback_fonts(families[1:])
     pdf.set_title(title)
     pdf.set_author("Character Prompt Studio")
+    if isinstance(source, DocumentResponse):
+        pdf.add_page()
+        for index, page in enumerate(source.content.split("\f")):
+            if index:
+                pdf.add_page()
+            for line in page.splitlines():
+                pdf.multi_cell(0, 5.3, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT, wrapmode="WORD")
+        return bytes(pdf.output())
     for section in source.sections:
         pdf.add_page()
         index = 0

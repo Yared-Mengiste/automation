@@ -1,3 +1,4 @@
+import base64
 import json
 
 import httpx
@@ -6,8 +7,67 @@ from anthropic import Anthropic
 
 from prompt_studio.agents import ClaudeRewriter
 from prompt_studio.errors import GenerationError
-from prompt_studio.models import EditResponse
+from prompt_studio.models import DocumentResponse, EditResponse, ReviewResponse
+from prompt_studio.pdf_source import read_pdf
 from prompt_studio.settings import Settings
+
+
+@pytest.mark.parametrize("stage", ["rewrite", "corrective_rewrite", "review"])
+def test_anthropic_sdk_sends_original_pdf_properties_and_image(stage, pdf, character, png):
+    source = read_pdf(pdf)
+    output = DocumentResponse(content="A complete adapted document in the source format.")
+    review = ReviewResponse(passed=True, issues=[])
+
+    def handle(request):
+        body = json.loads(request.content)
+        content = body["messages"][0]["content"]
+        payload = json.loads(content[0]["text"])
+        assert payload["saved_character"] == character.model_dump()
+        assert payload["attachment_instruction"] == "ATTACHMENT: Attach maya-cake.png as @image_1."
+        assert "source" not in payload
+        assert content[1]["type"] == "document"
+        assert content[1]["source"]["media_type"] == "application/pdf"
+        assert base64.b64decode(content[1]["source"]["data"]) == pdf
+        assert base64.b64decode(content[2]["source"]["data"]) == png
+        if stage == "review":
+            assert payload["result"] == output.model_dump()
+            response = review
+        else:
+            assert "content" in body["output_config"]["format"]["schema"]["properties"]
+            assert payload["correction_feedback"] == (
+                None if stage == "rewrite" else {"issues": []}
+            )
+            response = output
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_pdf",
+                "type": "message",
+                "role": "assistant",
+                "model": Settings.claude_model,
+                "content": [{"type": "text", "text": response.model_dump_json()}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 20, "output_tokens": 30},
+            },
+        )
+
+    with Anthropic(
+        api_key="test-only", http_client=httpx.Client(transport=httpx.MockTransport(handle))
+    ) as client:
+        agent = ClaudeRewriter(Settings(), client=client)
+        kwargs = {"pdf": pdf, "png_filename": "maya-cake.png"}
+        if stage == "review":
+            assert agent.review(source, output, character, png, **kwargs).passed
+        else:
+            feedback = None if stage == "rewrite" else {"issues": []}
+            assert agent.rewrite(source, character, png, feedback, **kwargs) == output
+
+
+def test_document_agent_requires_original_pdf(pdf, character, png):
+    agent = ClaudeRewriter(Settings(), client=object())
+    with pytest.raises(GenerationError, match="original PDF"):
+        agent.rewrite(read_pdf(pdf), character, png)
 
 
 def test_anthropic_sdk_serializes_and_parses_targeted_edits(source, character, png):

@@ -1,4 +1,4 @@
-"""Parse the supported labeled PDF dialect before any paid call."""
+"""Check PDF files; retain the labeled parser for legacy job snapshots."""
 
 import hashlib
 import io
@@ -7,7 +7,7 @@ import unicodedata
 
 from pypdf import PdfReader
 
-from .models import ParsedSource, PromptSection, SourceBlock, SourceShot
+from .models import ParsedSource, PDFSource, PromptSection, SourceBlock, SourceShot
 from .settings import Settings
 
 MAPPING_HEADER = re.compile(r"^Reference\s+Mapping\s*:\s*$", re.I)
@@ -188,35 +188,25 @@ def parse_text(text: str, *, pages=0, settings: Settings | None = None) -> Parse
     return ParsedSource(sections=sections, pages=pages, extracted_characters=len(text))
 
 
-def read_pdf(data: bytes, settings: Settings | None = None) -> ParsedSource:
+def read_pdf(data: bytes, settings: Settings | None = None) -> PDFSource:
     settings = settings or Settings()
     if not 0 < len(data) <= settings.max_pdf_bytes:
         raise ValueError("PDF must be nonempty and at most 10 MB.")
     if not data.lstrip().startswith(b"%PDF-"):
-        raise ValueError("Upload a valid text-based PDF.")
+        raise ValueError("Upload a valid PDF.")
     try:
-        reader = PdfReader(io.BytesIO(data), strict=True)
+        reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
             raise ValueError("Encrypted PDFs are unsupported. Export an unencrypted PDF.")
         if not 0 < len(reader.pages) <= settings.max_pages:
             raise ValueError("PDF must contain between 1 and 30 pages.")
-        texts, count = [], 0
-        for page in reader.pages:
-            text = page.extract_text(extraction_mode="layout") or ""
-            if not text.strip():
-                raise ValueError(
-                    "Unreadable or scanned page found. Export a text-based PDF; OCR is outside v1."
-                )
-            count += len(text)
-            if count > settings.max_characters:
-                raise ValueError("PDF exceeds 40,000 extracted characters.")
-            texts.append(text)
-        source = parse_text("\n".join(texts), pages=len(reader.pages), settings=settings)
-        source.source_sha256 = hashlib.sha256(data).hexdigest()
-        return source
+        if not any(
+            (contents := page.get_contents()) is not None and contents.get_data().strip()
+            for page in reader.pages
+        ):
+            raise ValueError("PDF is empty. Upload a PDF with content.")
+        return PDFSource(pages=len(reader.pages), source_sha256=hashlib.sha256(data).hexdigest())
     except ValueError:
         raise
     except Exception as exc:  # noqa: BLE001 — decoder exceptions may expose source contents.
-        raise ValueError(
-            "Could not read this PDF. Export a normal unencrypted text-based PDF."
-        ) from exc
+        raise ValueError("Could not read this PDF. Export a normal unencrypted PDF.") from exc

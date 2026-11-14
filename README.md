@@ -1,8 +1,8 @@
 # Character Prompt Studio
 
-A Streamlit app that replaces the primary character in existing text-based prompt PDFs. It saves the character library, original PDFs, immutable job snapshots, progress, and paired PDF/PNG outputs in a private Google Drive folder. Claude proposes targeted character edits and independently reviews the result. Human review is required before production use.
+A Streamlit app that replaces the primary character in prompt PDFs of different formats, including scanned documents. It saves the character library, original PDFs, immutable job snapshots, progress, and paired PDF/PNG outputs in a private Google Drive folder. Claude receives the original PDF, all saved character properties and the reference image, returns the complete adapted document, and independently reviews the result. Human review is required before production use.
 
-The sample `banana-cake.pdf` contains **14 seconds / 8 shots** and **22 seconds / 4 shots**. Both sections retain their own timeline and dialogue. Personal sample media is excluded from Git.
+The local samples include banana cake, orange cake, pumpkin cake, ice cream, chicken and oat bread documents with different headings, shot notation and introductory notes. Their format is interpreted by the model. Personal sample media is excluded from Git.
 
 ## Start here
 
@@ -91,20 +91,20 @@ docker compose up --build
 
 ## Use the app
 
-- **Generate:** upload a PDF and select active characters. The free preview shows all extracted prompts, original mappings, independent section durations and shot counts, character versions, exact target mappings, attachment names, and replacement rules. **Save and generate** snapshots inputs before making paid calls. If processing is busy, it saves a pending job.
+- **Generate:** upload a PDF and select active characters. The free preview checks that the PDF has content and shows its page count, selected character versions, target mappings, attachment names and replacement rules. **Save and generate** snapshots inputs before sending the original PDF, character properties and reference image to Claude. If processing is busy, it saves a pending job.
 - **Characters:** everyone can preview active characters and saved rules. The admin can add/edit descriptions, replace PNG/JPEG/WebP references (normalized to PNG), archive, restore, and permanently delete after typing the immutable slug. Names and sanitized slugs must be unique, including archived entries. Description/image changes increment the version; stale edits are rejected.
-- **Job History:** both accounts see all shared jobs. Resume unfinished stages, retry a failed character, inspect structural and AI reports separately, press **Prepare downloads** to load complete PDF/PNG pairs and a complete-job ZIP, and open Drive folders. Files are fetched on request so history refreshes do not download every past job.
+- **Job History:** both accounts see all shared jobs. Resume unfinished stages, retry a failed character, inspect output checks and AI review separately, press **Prepare downloads** to load complete PDF/PNG pairs and a complete-job ZIP, and open Drive folders. Files are fetched on request so history refreshes do not download every past job.
 - **Account Status:** admin-only configuration status; edit account settings through Secrets.
 
 A character has an immutable ID and filename slug, display name, one exact `@image_1 = ...` mapping line, reference PNG, pronouns, voice/accent, personality, wardrobe, negatives, consistency instructions, active/archived status, version, revision, and UTC timestamps. All descriptions are required. Unsupported Unicode glyphs are rejected before paid work or rendering; deployed fonts include Ethiopic.
 
 ## Supported PDFs and replacement rules
 
-Limits are **10 MB**, **30 pages**, and **40,000 extracted characters**. PDFs must contain readable text on every page, consistent repeated `@image_1` mappings, `Reference Mapping:` section starts, `FORMAT: 14s / 8 SHOTS / ...` declarations, and timed `SHOT 1 — 0:00 to 0:02.4, ...` blocks. Each section must start at zero and cover its declared duration without gaps, overlaps, or misnumbered shots. Quoted speaker labels and `DIALOGUE:` blocks are preserved. Unsupported, scanned, encrypted, inconsistent, or ambiguous PDFs are rejected before paid calls. Extraction repairs layout whitespace and fragmented labels while joining page-spanning blocks.
+Limits are **10 MB** and **30 pages**. The free check accepts nonempty, unencrypted PDFs without requiring a particular text format. It does not extract text or parse mappings, shots, dialogue or timelines. Scanned pages, blank pages alongside content, introductory notes, tables, different headings, singular `shot` declarations and different timestamp separators are accepted. Empty files, PDFs without page content, invalid files and encrypted PDFs are rejected before paid calls.
 
-The mapping is inserted exactly. The matching output PNG filename goes on a separate `ATTACHMENT:` line. Claude may edit only character-dependent appearance, pronouns, wardrobe, voice/accent, personality, negatives, and continuity. Saved traits win over conflicting original traits; shared traits remain. Story, actions, camera directions, locations, lighting, style, sound, and dialogue content must be preserved. Shot headers, timing declarations, order, and dialogue are protected by deterministic validation. Edits must use exact unique source substrings and cannot overlap.
+Claude reads the original PDF directly and returns the complete adapted document as text. It is instructed to include the exact saved mapping and a separate `ATTACHMENT:` line with the matching PNG filename in every prompt section. It adapts character-dependent appearance, pronouns, speaker identity, wardrobe, voice/accent, personality, negatives and continuity. Saved traits win over conflicting original traits; shared traits remain. Story, actions, camera directions, locations, lighting, style, sound, spoken dialogue content, sections, shot order and original timings must be preserved. The application renders the returned text into a new PDF; original page layout is not reproduced exactly.
 
-An independent AI review checks obsolete or missing character traits and changes to protected meaning. One corrective rewrite is allowed, followed by repeated structural validation and AI review. If validation still fails, that character gets no completed output. AI review is fallible: **human semantic review is required before production**.
+An independent AI review receives the same original PDF and reference image and compares the full adaptation against all saved properties. It checks omissions, obsolete or missing traits, mappings, PNG instructions, story, dialogue and timings. One corrective rewrite is allowed. Local output checks verify nonempty text and renderable Unicode; they do not claim deterministic timing or dialogue preservation. If checks or AI review still fail, that character gets no completed output. AI review is fallible: **human semantic review is required before production**. Existing jobs saved with the old labeled parser continue using their original checkpoint format when resumed.
 
 ## Durable files and resume behavior
 
@@ -122,7 +122,7 @@ Character Prompt Studio/
     <character-slug>-<prompt-slug>.png
 ```
 
-The manifest records creator, UTC timestamps, source, snapshots/versions, model settings, attempts, stage/status, structural/AI reports, token usage, provider request IDs, and reserved Drive file IDs. The initial manifest briefly embeds input bytes until snapshot uploads finish, making interrupted job creation recoverable without relying on later library contents. It never stores deployment credentials.
+The manifest records creator, UTC timestamps, PDF metadata, snapshots/versions, model settings, attempts, stage/status, output-check/AI reports, token usage, provider request IDs, and reserved Drive file IDs. The initial manifest briefly embeds input bytes until snapshot uploads finish, making interrupted job creation recoverable without relying on later library contents. It never stores deployment credentials.
 
 Rewrite, candidate, review, and validated-text checkpoints have attempt-specific reserved IDs. Checkpoints are reconciled even when an upload finishes but the manifest update is interrupted. Validated text is saved before PDF rendering. PDFs and PNGs are uploaded immediately using pre-reserved IDs and checksums. Completion requires both files. Resume skips completed characters and checkpointed AI work. An AI response interrupted **before** its checkpoint may require another paid call. Explicit retries after exhausted validation create a fresh attempt; upload/render retries reuse the validated attempt.
 
@@ -151,14 +151,14 @@ ruff check prompt_studio app.py scripts tests
 ruff format --check prompt_studio app.py scripts tests
 ```
 
-Tests use mocked AI and Drive, plus real SDK serialization against local transports. They exercise the sample dialect, whitespace fragmentation, page-spanning dialogue, mappings/filename pairing, protected timings/dialogue, conflicts/shared traits, review correction/exhaustion, hashed authentication and permissions, shared history/sign-out, stale edits, versioning, deletion, Unicode PDF extraction, and restarts/failures before and after every durable stage. They verify that checkpointed AI work and uploaded files are reused. Mocked review tests cannot establish real semantic quality. Server socket binding and Docker daemon access are blocked by this workspace sandbox, so external browser/server and Docker smoke checks must be run after setup; Streamlit app execution is covered by AppTest.
+Tests use mocked AI and Drive, plus real SDK serialization against local transports. They cover all available local PDF formats, arbitrary text, scans with blank pages, direct PDF/image/property transmission for rewriting and review, correction/exhaustion, nonempty output checks, legacy job compatibility, authentication, shared history, stale edits, Unicode rendering, and interruptions before and after every durable stage. They verify that checkpointed AI work and uploaded files are reused. Mocked review tests cannot establish real semantic quality. Streamlit app execution is covered by AppTest; live model and deployment acceptance requires configured services.
 
 After configuring real credentials, run this acceptance job:
 
 1. Add two real characters with complete descriptions and reference images as admin.
-2. Upload `banana-cake.pdf`, select both, and verify the free preview is 14s/8 shots plus 22s/4 shots.
+2. Upload each available sample PDF, select both characters, and verify that the free preview accepts the file and shows its page count and selected outputs.
 3. Generate and inspect both PDF/PNG pairs. Check exact mappings, matching PNG instructions, unchanged dialogue and all timings; manually review obsolete traits and story preservation.
 4. Create another job, interrupt or restart the app after a character finishes, and press Resume from the other account. Verify the completed character is skipped, file IDs stay the same, and remaining work completes.
 5. Download all pairs and the ZIP from both app accounts, and open the private Drive folder using an authorized Google login. Confirm ZIP contents and direct Drive access.
 
-Live acceptance is pending until OAuth, API billing/key/model access, and hosting are configured. OCR, multiple reference characters, video analysis/transcription, generated images/video, dollar budgets, and automatic background processing are outside v1.
+Live acceptance is pending until OAuth, API billing/key/model access, and hosting are configured, including checking the model's reading of scanned pages. Multiple reference characters, video analysis/transcription, generated images/video, dollar budgets, and automatic background processing are outside v1.
