@@ -1,0 +1,43 @@
+Reference Mapping:
+@image_1 = The man — lean, dark hair, a black cap and black T-shirt. Use exactly as shown.
+
+FORMAT: 14s / 8 SHOTS / In his kitchen, a guy makes a banana cake.
+SUBJECT: The man from @image_1 has a deep American voice and a friendly personality.
+WARDROBE: black cap, black T-shirt. Bare hands, no gloves.
+ENVIRONMENT: A real kitchen with white cabinets. Soft daylight.
+NEGATIVE PROMPT: gloves, cap backwards, extra people, flour, cinematic color grade.
+SHOT 1 — 0:00 to 0:02, MS. He tips three eggs into the bowl.
+Man: "Did you know if you mix three eggs"
+SHOT 2 — 0:02 to 0:04, CU. His hands lift the empty bowl.
+Man: "with three bananas,"
+SHOT 3 — 0:04 to 0:06, MS. He pours yogurt.
+Man: "add Greek yogurt,"
+SHOT 4 — 0:06 to 0:08, MS. He pours honey.
+Man: "add honey,"
+SHOT 5 — 0:08 to 0:10, MS. He uses the mixer.
+Man: "then mix it until smooth,"
+SHOT 6 — 0:10 to 0:11, MS. He pours batter into the dish.
+Man: "pour it into a baking tray,"
+SHOT 7 — 0:11 to 0:12, CU. His black T-shirt is above the dish. He adds blueberries.
+Man: "add some blueberries on top,"
+SHOT 8 — 0:12 to 0:14, MS. He slides the dish into the oven.
+Man: "then bake it for thirty minutes,"
+DIALOGUE ASSIGNMENT — CRITICAL: Only the man. Deep American voice.
+
+Reference Mapping:
+@image_1 = The man — lean, dark hair, a black cap and black T-shirt. Use exactly as shown.
+FORMAT: 22s / 4 SHOTS / In his kitchen, a guy shows a cake.
+SUBJECT: The man from @image_1 has a deep American voice and a friendly personality.
+WARDROBE: black cap, black T-shirt. Bare hands, no gloves.
+NEGATIVE PROMPT: gloves, cap backwards, extra people, flour, cinematic color grade.
+SHOT 1 — 0:00 to 0:03, CU. He pushes a fork into the loaf.
+Man: "you end up with a blueberry banana"
+SHOT 2 — 0:03 to 0:07, MS. He lifts a slice.
+Man: "cake with no flour."
+SHOT 3 — 0:07 to 0:14, MS selfie. He shows the slice to the lens.
+Man: "Blueberries are loaded with
+
+antioxidants. So soft and so fluffy."
+SHOT 4 — 0:14 to 0:22, MS selfie. He holds the slice and smiles.
+Man: "Follow me so you don't miss the next one."
+DIALOGUE ASSIGNMENT — CRITICAL: Only the man. Deep American voice.

@@ -1,0 +1,11 @@
+anthropic==0.125.0
+streamlit==1.67.0
+pydantic==2.14.3
+Pillow==12.3.0
+fpdf2==2.9.0
+pypdf==6.21.4
+python-dotenv==1.2.4
+fonttools==4.68.0
+google-auth==2.62.2
+google-auth-oauthlib==1.5.0
+google-api-python-client==2.202.0

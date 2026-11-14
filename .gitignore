@@ -1,0 +1,20 @@
+.env
+.venv/
+.streamlit/secrets.toml
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+outputs/
+*.pyc
+# Keep personal example media out of a published repository.
+*.mp4
+*.mov
+*.jpeg
+*.jpg
+*.png
+*.pdf
+
+# Local OAuth credentials and private acceptance artifacts.
+.streamlit/google-oauth.toml
+google-client*.json
+client-secret*.json

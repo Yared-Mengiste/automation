@@ -1,0 +1,9 @@
+*
+!app.py
+!requirements.txt
+!prompt_studio/
+!prompt_studio/**
+!.streamlit/
+!.streamlit/config.toml
+**/__pycache__
+**/*.pyc
